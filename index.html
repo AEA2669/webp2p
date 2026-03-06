@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileDrop — Instant P2P File Sharing</title>
+    <meta name="description" content="Share files instantly between devices with no upload. Peer-to-peer, encrypted, zero storage.">
+    <meta name="theme-color" content="#059669">
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon.svg">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FileDrop">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: {
+                animation: {
+                    'fade-in': 'fadeIn .4s ease-out',
+                    'slide-up': 'slideUp .4s ease-out',
+                    'pulse-ring': 'pulseRing 1.5s cubic-bezier(0.4,0,0.6,1) infinite',
+                    'float': 'float 6s ease-in-out infinite',
+                    'spin-slow': 'spinSlow 20s linear infinite',
+                    'reveal': 'reveal .7s ease-out forwards',
+                    'reveal-delay-1': 'reveal .7s ease-out .15s forwards',
+                    'reveal-delay-2': 'reveal .7s ease-out .3s forwards',
+                    'reveal-delay-3': 'reveal .7s ease-out .45s forwards',
+                    'glow': 'glow 4s ease-in-out infinite alternate',
+                },
+                keyframes: {
+                    fadeIn:    { from: { opacity: 0 }, to: { opacity: 1 } },
+                    slideUp:   { from: { opacity: 0, transform: 'translateY(12px)' }, to: { opacity: 1, transform: 'translateY(0)' } },
+                    pulseRing: { '0%': { transform:'scale(.8)', opacity:1 }, '100%': { transform:'scale(2.4)', opacity:0 } },
+                    float:     { '0%,100%': { transform:'translateY(0)' }, '50%': { transform:'translateY(-8px)' } },
+                    spinSlow:  { from: { transform:'rotate(0deg)' }, to: { transform:'rotate(360deg)' } },
+                    reveal:    { from: { opacity: 0, transform: 'translateY(30px)' }, to: { opacity: 1, transform: 'translateY(0)' } },
+                    glow:      { '0%': { boxShadow: '0 0 20px rgba(16,185,129,0.15)' }, '100%': { boxShadow: '0 0 40px rgba(16,185,129,0.3)' } },
+                }
+            }}
+        };
+    </script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+
+    <style>
+        body { background: linear-gradient(-45deg,#0f172a,#1e1b4b,#0f172a,#064e3b); background-size:400% 400%; animation:gradientBG 15s ease infinite; }
+        .dark body { background: linear-gradient(-45deg,#000,#0a0a0a,#050d1a,#000); }
+        @keyframes gradientBG { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+
+        .glass-panel { background:rgba(255,255,255,.97); backdrop-filter:blur(16px); box-shadow:0 25px 60px -12px rgba(0,0,0,.45); }
+        .dark .glass-panel { background:rgba(15,23,42,.92); border-color:rgba(255,255,255,.08)!important; color:#e2e8f0; }
+
+        .code-input { letter-spacing:.5em; text-align:center; font-size:1.75rem; font-weight:800; }
+
+        ::-webkit-scrollbar { width:5px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-thumb { background:#94a3b8; border-radius:3px; }
+        .dark ::-webkit-scrollbar-thumb { background:#334155; }
+
+        .drag-active { border-color:#10b981!important; background-color:#ecfdf5!important; transform:scale(1.02); }
+        .dark .drag-active { background-color:rgba(16,185,129,.08)!important; }
+
+        /* Progress bar */
+        .progress-track { height:6px; border-radius:3px; overflow:hidden; }
+        .progress-fill { height:100%; border-radius:3px; transition:width .15s linear; background:linear-gradient(90deg,#10b981,#14b8a6); }
+
+        /* Tab buttons */
+        .tab-btn { transition:all .2s; }
+        .tab-btn.active { background:linear-gradient(135deg,#10b981,#0d9488); color:#fff; box-shadow:0 2px 12px rgba(16,185,129,.35); }
+
+        /* QR container */
+        .qr-box canvas, .qr-box img { border-radius:12px; }
+
+        /* Chat bubbles */
+        .chat-mine { background:linear-gradient(135deg,#10b981,#0d9488); color:#fff; border-radius:16px 16px 4px 16px; }
+        .chat-theirs { background:#f1f5f9; color:#334155; border-radius:16px 16px 16px 4px; }
+        .dark .chat-theirs { background:#1e293b; color:#cbd5e1; }
+
+        /* Particles canvas */
+        #particleCanvas { position:fixed; inset:0; pointer-events:none; z-index:0; }
+
+        /* Typing indicator */
+        .typing-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#10b981; animation:typingBounce 1.4s infinite ease-in-out both; }
+        .typing-dot:nth-child(1) { animation-delay:-.32s; }
+        .typing-dot:nth-child(2) { animation-delay:-.16s; }
+        @keyframes typingBounce { 0%,80%,100%{transform:scale(0)} 40%{transform:scale(1)} }
+
+        /* Chat links */
+        .chat-link { color:#6ee7b7; text-decoration:underline; text-underline-offset:2px; }
+        .chat-link:hover { color:#34d399; }
+        .chat-theirs .chat-link { color:#10b981; }
+        .chat-theirs .chat-link:hover { color:#059669; }
+
+        /* Landing page */
+        .section-reveal { opacity:0; transform:translateY(30px); transition:opacity .6s ease-out, transform .6s ease-out; }
+        .section-reveal.visible { opacity:1; transform:translateY(0); }
+
+        .feature-card { background:rgba(255,255,255,.85); backdrop-filter:blur(10px); transition:all .35s ease; }
+        .feature-card:hover { transform:translateY(-6px); box-shadow:0 20px 40px -8px rgba(0,0,0,.12); }
+        .dark .feature-card { background:rgba(30,41,59,.7); }
+        .dark .feature-card:hover { box-shadow:0 20px 40px -8px rgba(0,0,0,.4); }
+
+        .step-card { position:relative; }
+        .step-card::after { content:''; position:absolute; top:50%; right:-24px; width:24px; height:2px; background:linear-gradient(90deg,#10b981,transparent); }
+        .step-card:last-child::after { display:none; }
+
+        .gradient-text { background:linear-gradient(135deg,#10b981,#0d9488,#6366f1); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+
+        .orb { position:absolute; border-radius:50%; filter:blur(60px); opacity:.15; pointer-events:none; }
+        .dark .orb { opacity:.08; }
+
+        /* App container modes */
+        .app-container { transition:max-width .5s ease, height .5s ease; }
+        .app-container.landing-mode { max-width:56rem; height:auto; }
+        .app-container.connected-mode { max-width:28rem; height:700px; }
+
+        .privacy-icon { width:48px; height:48px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+
+        @media (max-width:640px) {
+            .step-card::after { display:none; }
+        }
+
+        /* PWA Install Banner */
+        .pwa-banner { position:fixed; bottom:0; left:0; right:0; z-index:9999; transform:translateY(100%); transition:transform .4s cubic-bezier(.4,0,.2,1); pointer-events:none; }
+        .pwa-banner.show { transform:translateY(0); pointer-events:auto; }
+        .pwa-banner-inner { max-width:28rem; margin:0 auto 1rem; border-radius:1rem; padding:.875rem 1rem; display:flex; align-items:center; gap:.75rem; background:rgba(255,255,255,.97); backdrop-filter:blur(16px); box-shadow:0 -4px 30px rgba(0,0,0,.12); border:1px solid rgba(16,185,129,.2); }
+        .dark .pwa-banner-inner { background:rgba(15,23,42,.95); border-color:rgba(16,185,129,.15); box-shadow:0 -4px 30px rgba(0,0,0,.4); }
+        .pwa-banner-icon { width:40px; height:40px; border-radius:10px; flex-shrink:0; background:linear-gradient(135deg,#10b981,#0d9488); display:flex; align-items:center; justify-content:center; }
+        .pwa-banner-text { flex:1; min-width:0; }
+        .pwa-banner-title { font-weight:700; font-size:.875rem; color:#1e293b; }
+        .dark .pwa-banner-title { color:#e2e8f0; }
+        .pwa-banner-sub { font-size:.75rem; color:#64748b; margin-top:1px; }
+        .dark .pwa-banner-sub { color:#94a3b8; }
+        .pwa-install-btn { background:linear-gradient(135deg,#10b981,#0d9488); color:#fff; font-weight:600; font-size:.8rem; padding:.4rem .9rem; border-radius:.5rem; border:none; cursor:pointer; white-space:nowrap; transition:all .2s; }
+        .pwa-install-btn:hover { filter:brightness(1.1); transform:scale(1.03); }
+        .pwa-dismiss-btn { background:none; border:none; cursor:pointer; color:#94a3b8; padding:4px; border-radius:6px; transition:color .2s; line-height:0; }
+        .pwa-dismiss-btn:hover { color:#475569; }
+        .dark .pwa-dismiss-btn:hover { color:#e2e8f0; }
+    </style>
+</head>
+<body class="text-slate-800 font-sans min-h-screen p-4">
+
+<canvas id="particleCanvas"></canvas>
+
+<!-- PWA Install Banner (non-intrusive, fixed bottom) -->
+<div id="pwaInstallBanner" class="pwa-banner">
+    <div class="pwa-banner-inner">
+        <div class="pwa-banner-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div class="pwa-banner-text">
+            <div class="pwa-banner-title">Install FileDrop</div>
+            <div class="pwa-banner-sub">Use it like a native app — fast &amp; offline-ready</div>
+        </div>
+        <button id="pwaInstallBtn" class="pwa-install-btn">Install</button>
+        <button id="pwaDismissBtn" class="pwa-dismiss-btn" title="Dismiss">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+</div>
+
+<div id="appContainer" class="app-container landing-mode glass-panel rounded-3xl border border-white/20 w-full mx-auto overflow-hidden flex flex-col transition-all duration-500 relative z-10">
+
+    <!-- Header -->
+    <div class="bg-gradient-to-r from-emerald-500 to-teal-600 p-5 text-white text-center shrink-0 relative overflow-hidden">
+        <div class="absolute top-0 left-0 w-32 h-32 bg-white opacity-10 rounded-full -translate-x-10 -translate-y-10"></div>
+        <div class="absolute bottom-0 right-0 w-24 h-24 bg-white opacity-10 rounded-full translate-x-8 translate-y-8"></div>
+
+        <div class="flex items-center justify-between relative z-10">
+            <div class="flex items-center gap-3">
+                <div class="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <div class="text-left">
+                    <h1 class="text-xl font-black tracking-tight leading-tight">FILE DROP</h1>
+                    <p class="text-emerald-100 text-[11px] font-medium opacity-90">P2P • Encrypted • Zero Upload</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="headerDisconnectBtn" title="Disconnect" class="hidden bg-red-500/20 hover:bg-red-500/30 p-2 rounded-xl backdrop-blur-sm transition-all">
+                    <svg class="h-5 w-5 text-red-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </button>
+                <button id="soundToggle" title="Toggle sounds" class="bg-white/20 hover:bg-white/30 p-2 rounded-xl backdrop-blur-sm transition-all">
+                    <svg id="soundOnIcon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+                    <svg id="soundOffIcon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                </button>
+                <button id="darkToggle" title="Toggle dark mode" class="bg-white/20 hover:bg-white/30 p-2 rounded-xl backdrop-blur-sm transition-all">
+                    <svg id="sunIcon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                    <svg id="moonIcon" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="p-5 flex-1 flex flex-col overflow-y-auto space-y-5" id="mainContent">
+
+        <!-- ====== SETUP AREA / LANDING PAGE ====== -->
+        <div id="setupArea" class="animate-fade-in">
+
+            <!-- === HERO SECTION === -->
+            <div class="relative text-center py-6 sm:py-10 overflow-hidden">
+                <!-- Decorative orbs -->
+                <div class="orb w-48 h-48 bg-emerald-400 top-0 -left-20"></div>
+                <div class="orb w-64 h-64 bg-teal-500 -bottom-10 -right-20"></div>
+                <div class="orb w-32 h-32 bg-indigo-500 top-20 right-10"></div>
+
+                <div class="relative z-10">
+                    <div class="inline-flex items-center gap-2 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 px-4 py-1.5 rounded-full text-xs font-bold mb-5">
+                        <span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span>
+                        No servers. No uploads. Just you &amp; them.
+                    </div>
+                    <h2 class="text-3xl sm:text-4xl lg:text-5xl font-black leading-tight mb-4">
+                        Share Files Instantly,<br><span class="gradient-text">Device to Device</span>
+                    </h2>
+                    <p class="text-slate-500 dark:text-slate-400 text-sm sm:text-base max-w-lg mx-auto mb-8 leading-relaxed">
+                        Drop files, chat, and collaborate in real-time through a direct peer-to-peer connection. Nothing is ever uploaded to a server.
+                    </p>
+                </div>
+
+                <!-- Connection Cards — Hero -->
+                <div class="relative z-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl mx-auto">
+                    <!-- Your Code Card -->
+                    <div class="bg-slate-50 dark:bg-slate-800/60 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 text-center shadow-inner">
+                        <p class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Your Device Code</p>
+                        <div class="flex justify-center items-center gap-3">
+                            <span id="myPin" class="text-5xl font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-600 tracking-widest">----</span>
+                            <button id="copyCodeBtn" title="Copy code" class="text-slate-400 hover:text-emerald-500 transition-colors p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                            </button>
+                        </div>
+
+                        <!-- QR Code Section -->
+                        <div id="qrSection" class="mt-4">
+                            <button id="showQrBtn" class="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline">Show QR Code</button>
+                            <div id="qrContainer" class="hidden mt-3 flex justify-center qr-box"></div>
+                        </div>
+
+                        <button id="shareBtn" class="hidden mt-3 mx-auto inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                            Share Link
+                        </button>
+                        <p class="text-xs text-slate-400 dark:text-slate-500 mt-3 font-medium">Share this code with the other device</p>
+                    </div>
+
+                    <!-- Connect Card -->
+                    <div class="bg-white dark:bg-slate-800/40 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm text-center flex flex-col justify-center">
+                        <p class="text-sm font-bold text-slate-600 dark:text-slate-300 mb-3">Link to a device</p>
+                        <input type="text" id="remotePin" maxlength="4" placeholder="0000" autocomplete="off" inputmode="numeric"
+                            class="code-input w-48 mx-auto bg-slate-50 dark:bg-slate-700 border-2 border-slate-200 dark:border-slate-600 rounded-xl px-4 py-3 text-slate-800 dark:text-white focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/20 transition-all shadow-inner placeholder:text-slate-300 dark:placeholder:text-slate-500">
+
+                        <button id="connectBtn" class="mt-4 w-full bg-slate-800 dark:bg-emerald-600 hover:bg-slate-900 dark:hover:bg-emerald-700 text-white py-3.5 rounded-xl font-bold transition-all shadow-lg hover:shadow-xl active:scale-[.98] flex justify-center items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                            Connect Now
+                        </button>
+                        <p id="connectionStatus" class="text-sm font-semibold text-center mt-3 h-5 text-slate-500 dark:text-slate-400"></p>
+                    </div>
+                </div>
+
+                <!-- Trust Strip -->
+                <div class="flex items-center justify-center gap-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-6">
+                    <span class="flex items-center gap-1"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>Encrypted</span>
+                    <span>•</span>
+                    <span class="flex items-center gap-1"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/></svg>No Server</span>
+                    <span>•</span>
+                    <span class="flex items-center gap-1"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Instant</span>
+                </div>
+            </div>
+
+            <!-- === FEATURES SECTION === -->
+            <div class="section-reveal mt-10 sm:mt-14">
+                <div class="text-center mb-8">
+                    <p class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Everything You Need</p>
+                    <h3 class="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white">Powerful Features, Zero Complexity</h3>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <!-- Feature 1: File Transfer -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">P2P File Transfer</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Send any file directly to another device. No size limits, no uploads, no waiting. Files stream at full speed through WebRTC.</p>
+                    </div>
+                    <!-- Feature 2: Encrypted Chat -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center mb-4 shadow-lg shadow-violet-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">Encrypted Chat</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Real-time messaging with typing indicators, link previews, and sound notifications. Messages never touch a server.</p>
+                    </div>
+                    <!-- Feature 3: Live Notepad -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-4 shadow-lg shadow-amber-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">Live Notepad</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">A shared notepad that syncs in real-time. Both peers see changes instantly — perfect for quick collaboration.</p>
+                    </div>
+                    <!-- Feature 4: Clipboard Sync -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center mb-4 shadow-lg shadow-sky-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">Clipboard Sync</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">One click to share your clipboard contents with the connected device. Copy on one, paste on the other.</p>
+                    </div>
+                    <!-- Feature 5: QR Code Sharing -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center mb-4 shadow-lg shadow-pink-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">QR Code Connect</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Generate a QR code or shareable link. The other device scans it and connects instantly — no typing needed.</p>
+                    </div>
+                    <!-- Feature 6: Transfer History -->
+                    <div class="feature-card rounded-2xl p-5 border border-slate-200/60 dark:border-slate-700/60">
+                        <div class="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-400 to-blue-600 flex items-center justify-center mb-4 shadow-lg shadow-indigo-500/20">
+                            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-1.5">Transfer History</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Keep track of every file sent and received during your session. File type icons, sizes, and timestamps at a glance.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === HOW IT WORKS SECTION === -->
+            <div class="section-reveal mt-10 sm:mt-14">
+                <div class="text-center mb-8">
+                    <p class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Simple as 1-2-3</p>
+                    <h3 class="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white">How It Works</h3>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-2xl mx-auto">
+                    <!-- Step 1 -->
+                    <div class="step-card text-center bg-white dark:bg-slate-800/50 rounded-2xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto mb-4 text-white text-2xl font-black shadow-lg shadow-emerald-500/25">1</div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-2">Get Your Code</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Open FileDrop on both devices. Each gets a unique 4-digit code automatically.</p>
+                    </div>
+                    <!-- Step 2 -->
+                    <div class="step-card text-center bg-white dark:bg-slate-800/50 rounded-2xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-400 to-purple-500 flex items-center justify-center mx-auto mb-4 text-white text-2xl font-black shadow-lg shadow-violet-500/25">2</div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-2">Share the Code</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Enter the other device's code, scan a QR code, or share a link. Connection takes under a second.</p>
+                    </div>
+                    <!-- Step 3 -->
+                    <div class="step-card text-center bg-white dark:bg-slate-800/50 rounded-2xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm">
+                        <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mx-auto mb-4 text-white text-2xl font-black shadow-lg shadow-amber-500/25">3</div>
+                        <h4 class="font-bold text-slate-800 dark:text-white mb-2">Start Sharing!</h4>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Drop files, chat, use the live notepad, or sync clipboards. Everything happens in real-time.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === PRIVACY & SECURITY SECTION === -->
+            <div class="section-reveal mt-10 sm:mt-14">
+                <div class="text-center mb-8">
+                    <p class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Your Data, Your Rules</p>
+                    <h3 class="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white">Privacy &amp; Security</h3>
+                    <p class="text-sm text-slate-500 dark:text-slate-400 mt-3 max-w-lg mx-auto leading-relaxed">FileDrop was built with one principle: your data should never leave your control. Here's how we keep it that way.</p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                    <div class="flex items-start gap-4 bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-700">
+                        <div class="privacy-icon bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-slate-800 dark:text-white text-sm mb-1">End-to-End Encrypted</h4>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">All data is encrypted via WebRTC's built-in DTLS encryption. Only the two connected peers can read the data.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-4 bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-700">
+                        <div class="privacy-icon bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-slate-800 dark:text-white text-sm mb-1">No Server Storage</h4>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Files and messages are never uploaded to any server. Data flows directly between devices through a peer-to-peer connection.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-4 bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-700">
+                        <div class="privacy-icon bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-slate-800 dark:text-white text-sm mb-1">No Accounts Required</h4>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">No sign-up, no login, no email. A random 4-digit code is all you need. It changes every time you reload.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-4 bg-white dark:bg-slate-800/50 rounded-2xl p-5 border border-slate-100 dark:border-slate-700">
+                        <div class="privacy-icon bg-rose-100 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400">
+                            <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-slate-800 dark:text-white text-sm mb-1">Zero Tracking</h4>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">No analytics, no cookies, no tracking pixels. We don't know who you are, what you share, or when you use it.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === ABOUT SECTION === -->
+            <div class="section-reveal mt-10 sm:mt-14">
+                <div class="max-w-2xl mx-auto bg-gradient-to-br from-emerald-500/10 to-teal-500/10 dark:from-emerald-900/20 dark:to-teal-900/20 rounded-2xl p-6 sm:p-8 border border-emerald-200/40 dark:border-emerald-800/30 text-center">
+                    <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center mx-auto mb-5 shadow-lg shadow-emerald-500/25">
+                        <svg class="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    </div>
+                    <h3 class="text-xl sm:text-2xl font-black text-slate-800 dark:text-white mb-3">What is FileDrop?</h3>
+                    <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+                        FileDrop is a free, open-source tool for sharing files and collaborating between devices without any middleman. Built on WebRTC technology, it creates a direct encrypted tunnel between two browsers — no apps to install, no accounts to create, no data stored anywhere.
+                    </p>
+                    <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+                        Whether you're sending a photo from your phone to your laptop, collaborating on notes with a colleague, or just need to quickly move some files — FileDrop makes it effortless and private.
+                    </p>
+                    <div class="flex flex-wrap items-center justify-center gap-3 mt-5">
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-slate-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            100% Free
+                        </span>
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-slate-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            Open Source
+                        </span>
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-slate-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            No Install Needed
+                        </span>
+                        <span class="inline-flex items-center gap-1.5 text-xs font-bold bg-white/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-full border border-slate-200/50 dark:border-slate-700/50">
+                            <svg class="w-3.5 h-3.5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                            Works on All Devices
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- === FAQ SECTION === -->
+            <div class="section-reveal mt-10 sm:mt-14">
+                <div class="text-center mb-8">
+                    <p class="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest mb-2">Got Questions?</p>
+                    <h3 class="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white">Frequently Asked</h3>
+                </div>
+                <div class="max-w-2xl mx-auto space-y-3">
+                    <details class="group bg-white dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+                        <summary class="flex items-center justify-between cursor-pointer p-4 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            Is there a file size limit?
+                            <svg class="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                        </summary>
+                        <div class="px-4 pb-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">There's no hard limit. Files are transferred in 64KB chunks via WebRTC. In practice, files up to several GB work well. Speed depends on your internet connection since data goes directly between peers.</div>
+                    </details>
+                    <details class="group bg-white dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+                        <summary class="flex items-center justify-between cursor-pointer p-4 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            Do both devices need to be on the same network?
+                            <svg class="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                        </summary>
+                        <div class="px-4 pb-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">No! FileDrop works across any network. WebRTC uses STUN/TURN servers to establish the initial connection, then data flows directly between peers regardless of their location.</div>
+                    </details>
+                    <details class="group bg-white dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+                        <summary class="flex items-center justify-between cursor-pointer p-4 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            What happens when I close the page?
+                            <svg class="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                        </summary>
+                        <div class="px-4 pb-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Everything is gone. Nothing is saved on any server. Your connection code, chat history, notepad content, and transfer history only exist in your browser while the page is open. Refreshing gives you a new code.</div>
+                    </details>
+                    <details class="group bg-white dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+                        <summary class="flex items-center justify-between cursor-pointer p-4 text-sm font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            Can someone intercept my files?
+                            <svg class="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+                        </summary>
+                        <div class="px-4 pb-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">WebRTC connections use DTLS encryption by default, making it extremely difficult for anyone to intercept the data. The 4-digit code is only valid while both pages are open.</div>
+                    </details>
+                </div>
+            </div>
+
+            <!-- === FOOTER === -->
+            <div class="mt-10 sm:mt-14 mb-4 text-center">
+                <div class="border-t border-slate-200/50 dark:border-slate-700/50 pt-6">
+                    <div class="flex items-center justify-center gap-2 mb-3">
+                        <div class="bg-gradient-to-r from-emerald-500 to-teal-600 p-1.5 rounded-lg">
+                            <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                        </div>
+                        <span class="font-black text-slate-700 dark:text-slate-300 text-sm">FILE DROP</span>
+                    </div>
+                    <p class="text-xs text-slate-400 dark:text-slate-500 leading-relaxed">Built with WebRTC &bull; No servers &bull; Your data stays yours</p>
+                    <p class="text-[10px] text-slate-300 dark:text-slate-600 mt-2">Open source peer-to-peer file sharing</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ====== TRANSFER AREA ====== -->
+        <div id="transferArea" class="hidden flex-col h-full space-y-3 transition-all duration-500">
+
+            <!-- Status Bar -->
+            <div class="flex justify-between items-center bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 px-4 py-2.5 rounded-xl text-sm font-bold border border-emerald-100 dark:border-emerald-800/40">
+                <div class="flex items-center gap-2 relative">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span>Linked: <span id="connectedToPin" class="font-black text-emerald-600 dark:text-emerald-400"></span></span>
+                    <span id="connectionTimer" class="text-[10px] font-mono opacity-75">00:00:00</span>
+                </div>
+                <button id="disconnectBtn" class="flex items-center gap-1.5 bg-red-100 dark:bg-red-900/40 hover:bg-red-200 dark:hover:bg-red-800/40 text-red-600 dark:text-red-400 px-4 py-2 rounded-xl transition-colors font-bold text-xs shadow-sm hover:shadow-md">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/><line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    Disconnect
+                </button>
+            </div>
+
+            <!-- Tab Bar -->
+            <div class="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1">
+                <button class="tab-btn active flex-1 py-2 rounded-lg text-xs font-bold" data-tab="files">
+                    <span class="flex items-center justify-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                        Files
+                    </span>
+                </button>
+                <button class="tab-btn flex-1 py-2 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white" data-tab="chat">
+                    <span class="flex items-center justify-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                        Chat <span id="chatBadge" class="hidden bg-red-500 text-white text-[9px] w-4 h-4 rounded-full inline-flex items-center justify-center -mt-2 -ml-0.5">0</span>
+                    </span>
+                </button>
+                <button class="tab-btn flex-1 py-2 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white" data-tab="notepad">
+                    <span class="flex items-center justify-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        Pad
+                    </span>
+                </button>
+                <button class="tab-btn flex-1 py-2 rounded-lg text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white" data-tab="history">
+                    <span class="flex items-center justify-center gap-1.5">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        History <span id="historyCount" class="text-[9px] bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300 px-1.5 rounded-full font-black">0</span>
+                    </span>
+                </button>
+            </div>
+
+            <!-- ===== FILES TAB ===== -->
+            <div id="tabFiles" class="flex flex-col flex-1 space-y-3 min-h-0">
+                <!-- Quick Text & Clipboard -->
+                <div class="bg-slate-50 dark:bg-slate-800/40 p-2 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <textarea id="quickTextInput" maxlength="10000" rows="2" placeholder="Paste or type text to send instantly..." class="w-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all dark:text-white dark:placeholder:text-slate-400 resize-none"></textarea>
+                    <div class="flex gap-2 mt-1.5">
+                        <button id="quickTextSendBtn" class="flex-1 bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 text-white py-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 active:scale-[.98]">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                            Send Text
+                        </button>
+                        <button id="clipboardBtn" class="flex-1 bg-gradient-to-r from-sky-500 to-blue-500 hover:from-sky-600 hover:to-blue-600 text-white py-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 active:scale-[.98]">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                            Clipboard
+                        </button>
+                    </div>
+                </div>
+                <!-- Drop Zone -->
+                <div class="bg-slate-50 dark:bg-slate-800/40 p-2 rounded-2xl border border-slate-200 dark:border-slate-700 text-center relative group">
+                    <input type="file" id="fileInput" class="hidden" multiple>
+                    <label id="dropZone" for="fileInput" class="cursor-pointer block border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-6 hover:bg-slate-100 dark:hover:bg-slate-700/30 hover:border-emerald-400 transition-all duration-300">
+                        <div class="transform group-hover:-translate-y-1 transition-transform duration-300">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-9 w-9 mx-auto text-slate-400 dark:text-slate-500 mb-2 animate-float" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                        </div>
+                        <span class="text-slate-700 dark:text-slate-300 font-bold block">Click or Drag Files Here</span>
+                        <span class="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">Supports multiple files at once</span>
+                        <span id="selectedFileName" class="text-sm text-emerald-600 dark:text-emerald-400 block mt-2 font-semibold break-all"></span>
+                    </label>
+
+                    <!-- Progress Bar -->
+                    <div id="progressContainer" class="hidden px-2 mt-2">
+                        <div class="progress-track bg-slate-200 dark:bg-slate-700 w-full">
+                            <div id="progressFill" class="progress-fill" style="width:0%"></div>
+                        </div>
+                        <div class="flex justify-between mt-1 text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                            <span id="progressPercent">0%</span>
+                            <span id="progressSpeed"></span>
+                            <span id="progressEta"></span>
+                        </div>
+                    </div>
+
+                    <button id="sendFileBtn" disabled class="mt-2 w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:from-slate-300 disabled:to-slate-300 dark:disabled:from-slate-700 dark:disabled:to-slate-700 text-white py-3 rounded-xl font-bold transition-all shadow-md hover:shadow-lg disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                        <span id="sendBtnText">Send Files</span>
+                    </button>
+                    <p id="transferStatus" class="text-xs font-bold text-center mt-2 h-4 text-emerald-600 dark:text-emerald-400"></p>
+                </div>
+
+                <!-- Received Files -->
+                <div class="flex-1 bg-white dark:bg-slate-800/40 rounded-2xl border border-slate-100 dark:border-slate-700 p-3 shadow-sm flex flex-col min-h-0 overflow-hidden">
+                    <h3 class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest border-b border-slate-100 dark:border-slate-700 pb-2 mb-2 shrink-0">Incoming Files</h3>
+                    <div id="downloads" class="space-y-2 overflow-y-auto flex-1 pr-1">
+                        <div class="flex flex-col items-center justify-center h-full opacity-50" id="emptyDownloads">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-slate-300 dark:text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+                            <p class="text-xs font-medium text-slate-400 dark:text-slate-500">Waiting for files...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== CHAT TAB ===== -->
+            <div id="tabChat" class="hidden flex-col flex-1 min-h-0">
+                <div id="chatMessages" class="flex-1 overflow-y-auto space-y-2 pr-1 mb-1"></div>
+                <div id="typingIndicator" class="hidden px-1 py-1 shrink-0">
+                    <div class="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="typing-dot"></span>
+                        <span class="ml-0.5 font-medium italic">typing...</span>
+                    </div>
+                </div>
+                <div class="flex gap-2 shrink-0">
+                    <input id="chatInput" type="text" maxlength="500" placeholder="Type a message..." class="flex-1 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all dark:text-white dark:placeholder:text-slate-400">
+                    <button id="chatSendBtn" class="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 rounded-xl font-bold transition-all active:scale-95">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ===== HISTORY TAB ===== -->
+            <div id="tabHistory" class="hidden flex-col flex-1 min-h-0">
+                <div id="historyList" class="flex-1 overflow-y-auto space-y-2 pr-1">
+                    <div class="flex flex-col items-center justify-center h-full opacity-50">
+                        <svg class="h-7 w-7 text-slate-300 dark:text-slate-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <p class="text-xs font-medium text-slate-400 dark:text-slate-500">No transfers yet</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== NOTEPAD TAB ===== -->
+            <div id="tabNotepad" class="hidden flex-col flex-1 min-h-0">
+                <div class="flex items-center justify-between mb-2">
+                    <p class="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest">Live Notepad</p>
+                    <span id="notepadCharCount" class="text-[9px] text-slate-400 dark:text-slate-500 font-mono">0 / 50,000</span>
+                </div>
+                <textarea id="notepadTextarea" maxlength="50000" placeholder="Start typing... both peers see changes live." class="flex-1 w-full bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all dark:text-white dark:placeholder:text-slate-400 resize-none font-mono leading-relaxed"></textarea>
+                <p class="text-[9px] text-slate-400 dark:text-slate-500 mt-1.5 text-center font-medium">Changes sync in real-time between connected devices</p>
+            </div>
+
+        </div><!-- /transferArea -->
+    </div><!-- /mainContent -->
+</div>
+
+<script>
+// ============================================================
+// 1. SYSTEM INITIALIZATION
+// ============================================================
+const myCode = Math.floor(1000 + Math.random() * 9000).toString();
+const CHUNK_SIZE = 64 * 1024; // 64 KB chunks for reliable large file transfer
+const peer = new Peer('workdrop-v3-' + myCode, { debug: 0 });
+let currentConnection = null;
+let transferHistory = [];
+let unreadChat = 0;
+let soundEnabled = localStorage.getItem('fd-sound') !== 'false';
+let connectionStartTime = null;
+let connectionTimerInterval = null;
+let typingTimeout = null;
+let lastTypingSent = 0;
+let isRemoteTyping = false;
+let notepadSyncTimeout = null;
+let notepadRemoteUpdate = false;
+
+const UI = {
+    appContainer:   document.getElementById('appContainer'),
+    myPin:          document.getElementById('myPin'),
+    remotePin:      document.getElementById('remotePin'),
+    connectBtn:     document.getElementById('connectBtn'),
+    status:         document.getElementById('connectionStatus'),
+    setupArea:      document.getElementById('setupArea'),
+    transferArea:   document.getElementById('transferArea'),
+    connectedPin:   document.getElementById('connectedToPin'),
+    disconnectBtn:  document.getElementById('disconnectBtn'),
+    headerDisconnectBtn: document.getElementById('headerDisconnectBtn'),
+    fileInput:      document.getElementById('fileInput'),
+    dropZone:       document.getElementById('dropZone'),
+    selectedFile:   document.getElementById('selectedFileName'),
+    sendBtn:        document.getElementById('sendFileBtn'),
+    sendBtnText:    document.getElementById('sendBtnText'),
+    transferStatus: document.getElementById('transferStatus'),
+    downloads:      document.getElementById('downloads'),
+    emptyDownloads: document.getElementById('emptyDownloads'),
+    copyCodeBtn:    document.getElementById('copyCodeBtn'),
+    showQrBtn:      document.getElementById('showQrBtn'),
+    qrContainer:    document.getElementById('qrContainer'),
+    darkToggle:     document.getElementById('darkToggle'),
+    sunIcon:        document.getElementById('sunIcon'),
+    moonIcon:       document.getElementById('moonIcon'),
+    progressContainer: document.getElementById('progressContainer'),
+    progressFill:   document.getElementById('progressFill'),
+    progressPercent:document.getElementById('progressPercent'),
+    progressSpeed:  document.getElementById('progressSpeed'),
+    progressEta:    document.getElementById('progressEta'),
+    chatInput:      document.getElementById('chatInput'),
+    chatSendBtn:    document.getElementById('chatSendBtn'),
+    chatMessages:   document.getElementById('chatMessages'),
+    chatBadge:      document.getElementById('chatBadge'),
+    historyList:    document.getElementById('historyList'),
+    historyCount:   document.getElementById('historyCount'),
+    soundToggle:    document.getElementById('soundToggle'),
+    soundOnIcon:    document.getElementById('soundOnIcon'),
+    soundOffIcon:   document.getElementById('soundOffIcon'),
+    connectionTimer:document.getElementById('connectionTimer'),
+    shareBtn:       document.getElementById('shareBtn'),
+    quickTextInput: document.getElementById('quickTextInput'),
+    quickTextSendBtn:document.getElementById('quickTextSendBtn'),
+    clipboardBtn:   document.getElementById('clipboardBtn'),
+    typingIndicator:document.getElementById('typingIndicator'),
+    notepadTextarea:document.getElementById('notepadTextarea'),
+    notepadCharCount:document.getElementById('notepadCharCount'),
+};
+
+// ============================================================
+// 2. DARK MODE
+// ============================================================
+(function initDarkMode() {
+    const saved = localStorage.getItem('fd-dark');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (saved === 'true' || (saved === null && prefersDark)) toggleDark(true);
+})();
+
+function toggleDark(force) {
+    const isDark = typeof force === 'boolean' ? force : !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', isDark);
+    UI.sunIcon.classList.toggle('hidden', !isDark);
+    UI.moonIcon.classList.toggle('hidden', isDark);
+    localStorage.setItem('fd-dark', isDark);
+}
+UI.darkToggle.addEventListener('click', () => toggleDark());
+
+// ============================================================
+// 2b. SOUND TOGGLE
+// ============================================================
+function updateSoundIcon() {
+    UI.soundOnIcon.classList.toggle('hidden', !soundEnabled);
+    UI.soundOffIcon.classList.toggle('hidden', soundEnabled);
+}
+updateSoundIcon();
+UI.soundToggle.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('fd-sound', soundEnabled);
+    updateSoundIcon();
+});
+
+// ============================================================
+// 3. PARTICLES BACKGROUND
+// ============================================================
+(function initParticles() {
+    const canvas = document.getElementById('particleCanvas');
+    const ctx = canvas.getContext('2d');
+    let particles = [];
+    function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+    resize(); window.addEventListener('resize', resize);
+
+    for (let i = 0; i < 40; i++) {
+        particles.push({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*2+0.5, dx: (Math.random()-0.5)*0.4, dy: (Math.random()-0.5)*0.4, o: Math.random()*0.3+0.1 });
+    }
+
+    function animate() {
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        particles.forEach(p => {
+            p.x += p.dx; p.y += p.dy;
+            if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+            if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+            ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+            ctx.fillStyle = `rgba(16,185,129,${p.o})`; ctx.fill();
+        });
+        // Draw lines between nearby particles
+        for (let i=0;i<particles.length;i++) for (let j=i+1;j<particles.length;j++) {
+            const dx=particles[i].x-particles[j].x, dy=particles[i].y-particles[j].y, d=Math.sqrt(dx*dx+dy*dy);
+            if (d<120) { ctx.beginPath(); ctx.moveTo(particles[i].x,particles[i].y); ctx.lineTo(particles[j].x,particles[j].y); ctx.strokeStyle=`rgba(16,185,129,${0.06*(1-d/120)})`; ctx.stroke(); }
+        }
+        requestAnimationFrame(animate);
+    }
+    animate();
+})();
+
+// ============================================================
+// 4. SOUND EFFECTS (Web Audio API — no external files)
+// ============================================================
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+function playTone(freq, dur, type='sine') {
+    try {
+        if (!soundEnabled) return;
+        if (!audioCtx) audioCtx = new AudioCtx();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type; osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
+    } catch(e) {}
+}
+function sndConnect()  { playTone(523,.15); setTimeout(()=>playTone(659,.15),100); setTimeout(()=>playTone(784,.2),200); }
+function sndDisconnect(){ playTone(440,.15); setTimeout(()=>playTone(349,.25),120); }
+function sndSend()     { playTone(880,.1); setTimeout(()=>playTone(1047,.15),80); }
+function sndReceive()  { playTone(659,.1); setTimeout(()=>playTone(784,.1),80); setTimeout(()=>playTone(1047,.15),160); }
+function sndMessage()  { playTone(1200,.06); }
+
+// ============================================================
+// 5. HELPER UTILITIES
+// ============================================================
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024, sizes = ['B','KB','MB','GB','TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatDuration(seconds) {
+    if (!isFinite(seconds) || seconds < 0) return '--';
+    if (seconds < 60) return Math.ceil(seconds) + 's';
+    return Math.floor(seconds/60) + 'm ' + Math.ceil(seconds%60) + 's';
+}
+
+function getFileIcon(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const icons = {
+        img: ['jpg','jpeg','png','gif','webp','svg','bmp','ico','avif'],
+        vid: ['mp4','mov','avi','mkv','webm'],
+        aud: ['mp3','wav','ogg','m4a','flac','aac'],
+        doc: ['pdf','doc','docx','txt','rtf','odt'],
+        zip: ['zip','rar','7z','tar','gz'],
+        code:['js','ts','py','html','css','json','xml','yml','yaml','md'],
+    };
+    if (icons.img.includes(ext)) return { bg:'bg-pink-100 dark:bg-pink-900/30', text:'text-pink-600 dark:text-pink-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>' };
+    if (icons.vid.includes(ext)) return { bg:'bg-purple-100 dark:bg-purple-900/30', text:'text-purple-600 dark:text-purple-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>' };
+    if (icons.aud.includes(ext)) return { bg:'bg-amber-100 dark:bg-amber-900/30', text:'text-amber-600 dark:text-amber-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/>' };
+    if (icons.zip.includes(ext)) return { bg:'bg-orange-100 dark:bg-orange-900/30', text:'text-orange-600 dark:text-orange-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>' };
+    if (icons.code.includes(ext)) return { bg:'bg-cyan-100 dark:bg-cyan-900/30', text:'text-cyan-600 dark:text-cyan-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>' };
+    return { bg:'bg-indigo-100 dark:bg-indigo-900/30', text:'text-indigo-600 dark:text-indigo-400', svg:'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>' };
+}
+
+function sanitizeFilename(name) {
+    return String(name).replace(/[<>"'/\\&]/g, '_').substring(0, 255);
+}
+
+// ============================================================
+// 6. QR CODE & COPY
+// ============================================================
+UI.copyCodeBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(myCode).then(() => {
+        UI.copyCodeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
+        setTimeout(() => {
+            UI.copyCodeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>';
+        }, 1500);
+    });
+    playTone(1047,.08);
+});
+
+UI.showQrBtn.addEventListener('click', () => {
+    const container = UI.qrContainer;
+    if (!container.classList.contains('hidden')) { container.classList.add('hidden'); UI.showQrBtn.textContent='Show QR Code'; return; }
+    container.innerHTML = '';
+    const url = 'https://aea2669.github.io/webp2p/?code=' + myCode;
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    container.innerHTML = '<div class="inline-block p-3 bg-white rounded-xl shadow-lg">' + qr.createSvgTag({ cellSize: 4, margin: 2 }) + '</div>';
+    container.classList.remove('hidden');
+    container.classList.add('flex');
+    UI.showQrBtn.textContent = 'Hide QR Code';
+});
+
+// Auto-fill from URL parameter
+(function checkUrlCode() {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    if (code && /^\d{4}$/.test(code)) {
+        UI.remotePin.value = code;
+        // Wait for peer to be ready then auto-connect
+        peer.on('open', () => { setTimeout(() => UI.connectBtn.click(), 500); });
+    }
+})();
+
+// ============================================================
+// 7. PEERJS NETWORK LOGIC
+// ============================================================
+peer.on('open', () => { UI.myPin.innerText = myCode; });
+peer.on('connection', conn => setupConnection(conn));
+peer.on('error', err => {
+    if (err.type === 'peer-unavailable') flashStatus('Device not found. Check the code.', '#ef4444');
+    else if (err.type === 'network') flashStatus('Network error. Check connection.', '#ef4444');
+});
+
+// ============================================================
+// 8. CONNECTION HANDLING
+// ============================================================
+UI.remotePin.addEventListener('input', function() {
+    this.value = this.value.replace(/[^0-9]/g, '');
+    if (this.value.length === 4) { UI.connectBtn.click(); this.blur(); }
+});
+
+UI.connectBtn.addEventListener('click', () => {
+    const remoteCode = UI.remotePin.value;
+    if (remoteCode.length !== 4) return flashStatus('Enter a 4-digit code.', '#ef4444');
+    if (remoteCode === myCode) return flashStatus('Cannot connect to yourself.', '#ef4444');
+
+    UI.status.innerText = 'Connecting...';
+    UI.status.style.color = '#64748b';
+    UI.connectBtn.disabled = true;
+
+    const conn = peer.connect('workdrop-v3-' + remoteCode, { reliable: true });
+
+    const timeout = setTimeout(() => {
+        if (!currentConnection || !currentConnection.open) {
+            conn.close();
+            flashStatus('Connection timed out.', '#ef4444');
+            UI.connectBtn.disabled = false;
+        }
+    }, 8000);
+
+    conn.on('open', () => clearTimeout(timeout));
+    setupConnection(conn);
+});
+
+UI.disconnectBtn.addEventListener('click', () => {
+    if (!confirm('Disconnect from this device? Any ongoing transfers will be lost.')) return;
+    if (currentConnection) currentConnection.close();
+    resetUI();
+});
+
+UI.headerDisconnectBtn.addEventListener('click', () => {
+    if (!confirm('Disconnect from this device? Any ongoing transfers will be lost.')) return;
+    if (currentConnection) currentConnection.close();
+    resetUI();
+});
+
+// Chunked file receiving state
+let incomingChunks = {};
+
+function setupConnection(conn) {
+    currentConnection = conn;
+
+    conn.on('open', () => {
+        // Switch to connected mode
+        UI.appContainer.classList.remove('landing-mode');
+        UI.appContainer.classList.add('connected-mode');
+        document.body.classList.add('flex', 'items-center', 'justify-center');
+        UI.setupArea.classList.add('hidden');
+        UI.transferArea.classList.remove('hidden');
+        UI.transferArea.classList.add('flex');
+        UI.headerDisconnectBtn.classList.remove('hidden');
+        UI.connectedPin.innerText = conn.peer.replace('workdrop-v3-', '');
+        UI.remotePin.value = '';
+        UI.status.innerText = '';
+        UI.connectBtn.disabled = false;
+        sndConnect();
+        // Start connection timer
+        connectionStartTime = Date.now();
+        if (connectionTimerInterval) clearInterval(connectionTimerInterval);
+        connectionTimerInterval = setInterval(updateConnectionTimer, 1000);
+        updateConnectionTimer();
+        // Request notification permission
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    });
+
+    conn.on('data', data => {
+        if (!data || !data._type) {
+            // Legacy support: non-chunked file
+            if (data && data.file && data.filename) receiveFile(data);
+            return;
+        }
+
+        switch (data._type) {
+            case 'file-meta':
+                incomingChunks[data.id] = { filename: data.filename, filetype: data.filetype, size: data.size, chunks: [], received: 0, total: data.totalChunks };
+                showReceiveProgress(data.id);
+                break;
+            case 'file-chunk':
+                if (incomingChunks[data.id]) {
+                    incomingChunks[data.id].chunks[data.index] = data.chunk;
+                    incomingChunks[data.id].received++;
+                    updateReceiveProgress(data.id);
+                }
+                break;
+            case 'file-end':
+                if (incomingChunks[data.id]) {
+                    const info = incomingChunks[data.id];
+                    const blob = new Blob(info.chunks, { type: info.filetype });
+                    receiveFile({ file: null, filename: info.filename, filetype: info.filetype, size: info.size, _blob: blob });
+                    delete incomingChunks[data.id];
+                }
+                break;
+            case 'chat':
+                addChatMessage(data.text, false);
+                break;
+            case 'typing':
+                showTypingIndicator(data.isTyping);
+                break;
+            case 'text-snippet':
+                receiveTextSnippet(data.text);
+                break;
+            case 'clipboard':
+                receiveClipboard(data.text);
+                break;
+            case 'notepad-sync':
+                receiveNotepadSync(data.content);
+                break;
+        }
+    });
+
+    conn.on('close', () => { sndDisconnect(); resetUI(); });
+    conn.on('error', () => { resetUI(); });
+}
+
+function resetUI() {
+    currentConnection = null;
+    incomingChunks = {};
+    // Switch back to landing mode
+    UI.appContainer.classList.remove('connected-mode');
+    UI.appContainer.classList.add('landing-mode');
+    document.body.classList.remove('flex', 'items-center', 'justify-center');
+    UI.setupArea.classList.remove('hidden');
+    UI.transferArea.classList.add('hidden');
+    UI.transferArea.classList.remove('flex');
+    UI.headerDisconnectBtn.classList.add('hidden');
+    UI.connectBtn.disabled = false;
+    flashStatus('Disconnected.', '#ef4444');
+    UI.fileInput.value = '';
+    UI.selectedFile.innerText = '';
+    UI.sendBtn.disabled = true;
+    UI.chatMessages.innerHTML = '';
+    unreadChat = 0;
+    updateChatBadge();
+    // Clear connection timer
+    if (connectionTimerInterval) clearInterval(connectionTimerInterval);
+    connectionTimerInterval = null;
+    connectionStartTime = null;
+    if (UI.connectionTimer) UI.connectionTimer.textContent = '00:00:00';
+    // Clear typing state
+    if (typingTimeout) clearTimeout(typingTimeout);
+    typingTimeout = null;
+    isRemoteTyping = false;
+    if (UI.typingIndicator) UI.typingIndicator.classList.add('hidden');
+    // Clear notepad
+    if (UI.notepadTextarea) UI.notepadTextarea.value = '';
+    if (UI.notepadCharCount) UI.notepadCharCount.textContent = '0 / 50,000';
+    if (notepadSyncTimeout) clearTimeout(notepadSyncTimeout);
+    notepadSyncTimeout = null;
+    // Reset to files tab
+    switchTab('files');
+}
+
+function flashStatus(msg, color) {
+    UI.status.innerText = msg;
+    UI.status.style.color = color;
+    setTimeout(() => { if (UI.status.innerText === msg) UI.status.innerText = ''; }, 3500);
+}
+
+// ============================================================
+// 9. TAB SYSTEM
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.tab === tab);
+        if (b.dataset.tab !== tab) b.classList.add('text-slate-500','dark:text-slate-400');
+        else b.classList.remove('text-slate-500','dark:text-slate-400');
+    });
+    ['tabFiles','tabChat','tabNotepad','tabHistory'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const tabName = id.replace('tab','').toLowerCase();
+        el.classList.toggle('hidden', tab !== tabName);
+        el.classList.toggle('flex', tab === tabName);
+    });
+    if (tab === 'chat') { unreadChat = 0; updateChatBadge(); UI.chatInput.focus(); }
+    if (tab === 'notepad' && UI.notepadTextarea) UI.notepadTextarea.focus();
+}
+
+// ============================================================
+// 10. DRAG & DROP + FILE SELECTION
+// ============================================================
+UI.fileInput.addEventListener('change', handleFileSelect);
+
+['dragenter','dragover','dragleave','drop'].forEach(e => UI.dropZone.addEventListener(e, preventDefaults, false));
+function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+
+['dragenter','dragover'].forEach(e => UI.dropZone.addEventListener(e, () => UI.dropZone.classList.add('drag-active'), false));
+['dragleave','drop'].forEach(e => UI.dropZone.addEventListener(e, () => UI.dropZone.classList.remove('drag-active'), false));
+
+UI.dropZone.addEventListener('drop', e => {
+    const files = e.dataTransfer.files;
+    if (files.length > 0) { UI.fileInput.files = files; handleFileSelect(); }
+});
+
+function handleFileSelect() {
+    const files = UI.fileInput.files;
+    if (files.length > 0) {
+        let totalSize = 0;
+        for (let i = 0; i < files.length; i++) totalSize += files[i].size;
+
+        if (files.length === 1) {
+            UI.selectedFile.innerText = '📁 ' + files[0].name + ' (' + formatBytes(files[0].size) + ')';
+        } else {
+            UI.selectedFile.innerText = '📁 ' + files.length + ' files (' + formatBytes(totalSize) + ')';
+        }
+        UI.sendBtn.disabled = false;
+        UI.sendBtnText.textContent = files.length === 1 ? 'Send File' : 'Send ' + files.length + ' Files';
+        UI.sendBtn.classList.add('animate-pulse');
+        setTimeout(() => UI.sendBtn.classList.remove('animate-pulse'), 1200);
+    } else {
+        UI.selectedFile.innerText = '';
+        UI.sendBtn.disabled = true;
+        UI.sendBtnText.textContent = 'Send Files';
+    }
+}
+
+// ============================================================
+// 11. CHUNKED FILE SENDING
+// ============================================================
+UI.sendBtn.addEventListener('click', async () => {
+    const files = UI.fileInput.files;
+    if (!files.length || !currentConnection) return;
+
+    UI.sendBtn.disabled = true;
+
+    for (let f = 0; f < files.length; f++) {
+        const file = files[f];
+        await sendFileChunked(file);
+    }
+
+    UI.fileInput.value = '';
+    UI.selectedFile.innerText = '';
+    UI.sendBtnText.textContent = 'Send Files';
+    setTimeout(() => { UI.sendBtn.disabled = false; }, 500);
+});
+
+function sendFileChunked(file) {
+    return new Promise((resolve, reject) => {
+        const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+        UI.progressContainer.classList.remove('hidden');
+        UI.progressFill.style.width = '0%';
+        UI.progressPercent.textContent = '0%';
+        UI.progressSpeed.textContent = '';
+        UI.progressEta.textContent = '';
+        UI.transferStatus.innerText = 'Sending ' + sanitizeFilename(file.name) + '...';
+        UI.transferStatus.style.color = '#059669';
+
+        // Send metadata first
+        currentConnection.send({ _type: 'file-meta', id, filename: file.name, filetype: file.type, size: file.size, totalChunks });
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const buffer = reader.result;
+            let offset = 0;
+            let chunkIndex = 0;
+            const startTime = Date.now();
+
+            function sendNextChunk() {
+                if (offset >= buffer.byteLength) {
+                    currentConnection.send({ _type: 'file-end', id });
+                    UI.transferStatus.innerText = 'Sent ' + sanitizeFilename(file.name) + '!';
+                    addHistory('sent', file.name, file.size);
+                    UI.progressContainer.classList.add('hidden');
+                    sndSend();
+                    fireConfetti();
+                    setTimeout(() => { UI.transferStatus.innerText = ''; }, 3000);
+                    resolve();
+                    return;
+                }
+
+                const chunk = buffer.slice(offset, offset + CHUNK_SIZE);
+                try {
+                    currentConnection.send({ _type: 'file-chunk', id, index: chunkIndex, chunk });
+                } catch(e) {
+                    UI.transferStatus.innerText = 'Failed. File may be too large.';
+                    UI.transferStatus.style.color = '#ef4444';
+                    UI.progressContainer.classList.add('hidden');
+                    reject(e);
+                    return;
+                }
+
+                offset += CHUNK_SIZE;
+                chunkIndex++;
+                const pct = Math.min(100, Math.round((offset / buffer.byteLength) * 100));
+                UI.progressFill.style.width = pct + '%';
+                UI.progressPercent.textContent = pct + '%';
+
+                const elapsed = (Date.now() - startTime) / 1000;
+                if (elapsed > 0.3) {
+                    const speed = offset / elapsed;
+                    UI.progressSpeed.textContent = formatBytes(speed) + '/s';
+                    const remaining = (buffer.byteLength - offset) / speed;
+                    UI.progressEta.textContent = 'ETA ' + formatDuration(remaining);
+                }
+
+                // Yield to event loop every 8 chunks for UI updates
+                if (chunkIndex % 8 === 0) {
+                    setTimeout(sendNextChunk, 0);
+                } else {
+                    sendNextChunk();
+                }
+            }
+            sendNextChunk();
+        };
+        reader.onerror = () => { reject(reader.error); };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+// ============================================================
+// 12. RECEIVE FILES
+// ============================================================
+let receiveProgressCards = {};
+
+function showReceiveProgress(id) {
+    if (UI.emptyDownloads) UI.emptyDownloads.style.display = 'none';
+    const info = incomingChunks[id];
+    const card = document.createElement('div');
+    card.className = 'bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-200 dark:border-slate-600 animate-slide-up';
+    card.innerHTML = `
+        <div class="flex items-center gap-2 mb-2">
+            <div class="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-900/40 flex items-center justify-center shrink-0">
+                <svg class="w-4 h-4 text-emerald-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"></circle><path fill="currentColor" class="opacity-75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">${sanitizeFilename(info.filename)}</p>
+                <p class="text-[10px] text-slate-400">${formatBytes(info.size)}</p>
+            </div>
+            <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 receive-pct-${id}">0%</span>
+        </div>
+        <div class="progress-track bg-slate-200 dark:bg-slate-600"><div class="progress-fill receive-bar-${id}" style="width:0%"></div></div>
+    `;
+    UI.downloads.prepend(card);
+    receiveProgressCards[id] = card;
+}
+
+function updateReceiveProgress(id) {
+    const info = incomingChunks[id];
+    if (!info) return;
+    const pct = Math.round((info.received / info.total) * 100);
+    const bar = document.querySelector('.receive-bar-' + id);
+    const label = document.querySelector('.receive-pct-' + id);
+    if (bar) bar.style.width = pct + '%';
+    if (label) label.textContent = pct + '%';
+}
+
+function receiveFile(data) {
+    const blob = data._blob || new Blob([data.file], { type: data.filetype });
+    const size = data.size || blob.size;
+    const filename = sanitizeFilename(data.filename);
+    const downloadUrl = URL.createObjectURL(blob);
+    const icon = getFileIcon(filename);
+
+    // Remove any progress card
+    Object.keys(receiveProgressCards).forEach(id => {
+        const card = receiveProgressCards[id];
+        if (card && card.parentNode) card.parentNode.removeChild(card);
+        delete receiveProgressCards[id];
+    });
+
+    if (UI.emptyDownloads) UI.emptyDownloads.style.display = 'none';
+
+    const card = document.createElement('div');
+    card.className = 'bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm hover:shadow-md transition-all animate-slide-up group';
+
+    // Check if it's an image/video for preview
+    const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp|avif)$/i.test(filename);
+    const isVideo = /\.(mp4|webm|mov)$/i.test(filename);
+
+    let previewHTML = '';
+    if (isImage) {
+        previewHTML = `<img src="${downloadUrl}" alt="Preview" class="w-full h-28 object-cover rounded-lg mb-2 cursor-pointer" onclick="window.open('${downloadUrl}','_blank')">`;
+    } else if (isVideo) {
+        previewHTML = `<video src="${downloadUrl}" class="w-full h-28 object-cover rounded-lg mb-2" controls muted></video>`;
+    }
+
+    card.innerHTML = `
+        ${previewHTML}
+        <div class="flex justify-between items-center">
+            <div class="flex items-center gap-2.5 overflow-hidden flex-1 min-w-0">
+                <div class="${icon.bg} ${icon.text} p-2 rounded-lg shrink-0 group-hover:scale-110 transition-transform">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">${icon.svg}</svg>
+                </div>
+                <div class="min-w-0">
+                    <p class="text-xs font-bold text-slate-700 dark:text-slate-300 truncate">${filename}</p>
+                    <p class="text-[10px] text-slate-400 dark:text-slate-500">${formatBytes(size)}</p>
+                </div>
+            </div>
+            <a href="${downloadUrl}" download="${filename}" class="bg-slate-800 dark:bg-emerald-600 hover:bg-slate-900 dark:hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all active:scale-95 shrink-0 ml-2">Save</a>
+        </div>
+    `;
+
+    UI.downloads.prepend(card);
+
+    addHistory('received', filename, size);
+    sndReceive();
+    fireConfetti();
+    notifyIfHidden('File received: ' + filename);
+}
+
+// ============================================================
+// 13. CHAT SYSTEM
+// ============================================================
+UI.chatSendBtn.addEventListener('click', sendChat);
+UI.chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+UI.chatInput.addEventListener('input', () => {
+    if (!currentConnection) return;
+    const now = Date.now();
+    if (now - lastTypingSent > 1000) {
+        currentConnection.send({ _type: 'typing', isTyping: true });
+        lastTypingSent = now;
+    }
+    if (typingTimeout) clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        if (currentConnection) currentConnection.send({ _type: 'typing', isTyping: false });
+    }, 2000);
+});
+
+function sendChat() {
+    const text = UI.chatInput.value.trim();
+    if (!text || !currentConnection) return;
+    if (typingTimeout) clearTimeout(typingTimeout);
+    if (currentConnection) currentConnection.send({ _type: 'typing', isTyping: false });
+    currentConnection.send({ _type: 'chat', text });
+    addChatMessage(text, true);
+    UI.chatInput.value = '';
+}
+
+function addChatMessage(text, isMine) {
+    let safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    safeText = safeText.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="chat-link">$1</a>');
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const div = document.createElement('div');
+    div.className = 'animate-slide-up ' + (isMine ? 'text-right' : 'text-left');
+    div.innerHTML = `
+        <div class="inline-block max-w-[80%] px-3.5 py-2 ${isMine ? 'chat-mine' : 'chat-theirs'} text-sm">
+            ${safeText}
+        </div>
+        <p class="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 ${isMine ? 'pr-1' : 'pl-1'}">${time}</p>
+    `;
+    UI.chatMessages.appendChild(div);
+    UI.chatMessages.scrollTop = UI.chatMessages.scrollHeight;
+
+    if (!isMine) {
+        sndMessage();
+        notifyIfHidden('Message: ' + text.substring(0, 100));
+        // If not on chat tab, show badge
+        const chatTab = document.querySelector('[data-tab="chat"]');
+        if (!chatTab.classList.contains('active')) {
+            unreadChat++;
+            updateChatBadge();
+        }
+    }
+}
+
+function updateChatBadge() {
+    if (unreadChat > 0) {
+        UI.chatBadge.classList.remove('hidden');
+        UI.chatBadge.textContent = unreadChat > 9 ? '9+' : unreadChat;
+    } else {
+        UI.chatBadge.classList.add('hidden');
+    }
+}
+
+// ============================================================
+// 14. TRANSFER HISTORY
+// ============================================================
+function addHistory(direction, filename, size) {
+    transferHistory.unshift({ direction, filename, size, time: new Date() });
+    UI.historyCount.textContent = transferHistory.length;
+    renderHistory();
+}
+
+function renderHistory() {
+    if (transferHistory.length === 0) return;
+    UI.historyList.innerHTML = '';
+    transferHistory.forEach(h => {
+        const icon = getFileIcon(h.filename);
+        const isSent = h.direction === 'sent';
+        const card = document.createElement('div');
+        card.className = 'flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-700/40 border border-slate-100 dark:border-slate-700';
+        card.innerHTML = `
+            <div class="${icon.bg} ${icon.text} p-1.5 rounded-lg shrink-0">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${icon.svg}</svg>
+            </div>
+            <div class="flex-1 min-w-0">
+                <p class="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">${sanitizeFilename(h.filename)}</p>
+                <p class="text-[9px] text-slate-400 dark:text-slate-500">${formatBytes(h.size)} • ${h.time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</p>
+            </div>
+            <span class="text-[9px] font-bold px-2 py-0.5 rounded-full ${isSent ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'}">${isSent ? '↑ Sent' : '↓ Received'}</span>
+        `;
+        UI.historyList.appendChild(card);
+    });
+}
+
+// ============================================================
+// 15. CONFETTI
+// ============================================================
+function fireConfetti() {
+    const end = Date.now() + 1800;
+    (function frame() {
+        confetti({ particleCount:4, angle:60, spread:55, origin:{x:0}, colors:['#10b981','#14b8a6','#fff','#8b5cf6'] });
+        confetti({ particleCount:4, angle:120, spread:55, origin:{x:1}, colors:['#10b981','#14b8a6','#fff','#f59e0b'] });
+        if (Date.now() < end) requestAnimationFrame(frame);
+    })();
+}
+
+// ============================================================
+// 16. CONNECTION TIMER
+// ============================================================
+function updateConnectionTimer() {
+    if (!connectionStartTime) return;
+    const elapsed = Math.floor((Date.now() - connectionStartTime) / 1000);
+    const h = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+    const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+    const s = String(elapsed % 60).padStart(2, '0');
+    UI.connectionTimer.textContent = h + ':' + m + ':' + s;
+}
+
+// ============================================================
+// 17. NOTIFICATIONS
+// ============================================================
+function notifyIfHidden(body) {
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification('FileDrop', { body });
+    }
+}
+
+// ============================================================
+// 18. TYPING INDICATOR
+// ============================================================
+function showTypingIndicator(show) {
+    isRemoteTyping = show;
+    if (UI.typingIndicator) {
+        UI.typingIndicator.classList.toggle('hidden', !show);
+        if (show) UI.chatMessages.scrollTop = UI.chatMessages.scrollHeight;
+    }
+}
+
+// ============================================================
+// 19. QUICK TEXT SEND
+// ============================================================
+UI.quickTextSendBtn.addEventListener('click', sendQuickText);
+UI.quickTextInput.addEventListener('keydown', e => { if (e.key === 'Enter' && e.ctrlKey) sendQuickText(); });
+
+function sendQuickText() {
+    const text = UI.quickTextInput.value.trim();
+    if (!text || !currentConnection) return;
+    currentConnection.send({ _type: 'text-snippet', text: text.substring(0, 10000) });
+    UI.quickTextInput.value = '';
+    UI.transferStatus.innerText = 'Text snippet sent!';
+    UI.transferStatus.style.color = '#059669';
+    addHistory('sent', 'Text Snippet (' + formatBytes(text.length) + ')', text.length);
+    sndSend();
+    setTimeout(() => { UI.transferStatus.innerText = ''; }, 3000);
+}
+
+function receiveTextSnippet(text) {
+    if (UI.emptyDownloads) UI.emptyDownloads.style.display = 'none';
+    const safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    const card = document.createElement('div');
+    card.className = 'bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm animate-slide-up';
+    card.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+                <div class="bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 p-1.5 rounded-lg">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-300">Text Snippet</span>
+            </div>
+            <button onclick="navigator.clipboard.writeText(this.closest('[data-snippet]').dataset.snippet);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="bg-slate-800 dark:bg-emerald-600 hover:bg-slate-900 dark:hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-[11px] font-bold transition-all active:scale-95">Copy</button>
+        </div>
+        <div class="text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 rounded-lg p-2.5 max-h-32 overflow-y-auto break-all font-mono leading-relaxed">${safeText}</div>
+    `;
+    card.dataset.snippet = text;
+    UI.downloads.prepend(card);
+    addHistory('received', 'Text Snippet (' + formatBytes(text.length) + ')', text.length);
+    sndReceive();
+    notifyIfHidden('Text snippet received');
+}
+
+// ============================================================
+// 20. CLIPBOARD SYNC
+// ============================================================
+UI.clipboardBtn.addEventListener('click', async () => {
+    if (!currentConnection) return;
+    try {
+        const text = await navigator.clipboard.readText();
+        if (!text) return;
+        currentConnection.send({ _type: 'clipboard', text: text.substring(0, 10000) });
+        UI.transferStatus.innerText = 'Clipboard shared!';
+        UI.transferStatus.style.color = '#059669';
+        sndSend();
+        setTimeout(() => { UI.transferStatus.innerText = ''; }, 3000);
+    } catch(e) {
+        UI.transferStatus.innerText = 'Clipboard access denied.';
+        UI.transferStatus.style.color = '#ef4444';
+        setTimeout(() => { UI.transferStatus.innerText = ''; }, 3000);
+    }
+});
+
+function receiveClipboard(text) {
+    if (UI.emptyDownloads) UI.emptyDownloads.style.display = 'none';
+    const safeText = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    const card = document.createElement('div');
+    card.className = 'bg-slate-50 dark:bg-slate-700/50 p-3 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm animate-slide-up';
+    card.innerHTML = `
+        <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+                <div class="bg-sky-100 dark:bg-sky-900/30 text-sky-600 dark:text-sky-400 p-1.5 rounded-lg">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                </div>
+                <span class="text-xs font-bold text-slate-700 dark:text-slate-300">Clipboard Sync</span>
+            </div>
+            <button onclick="navigator.clipboard.writeText(this.closest('[data-snippet]').dataset.snippet);this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)" class="bg-slate-800 dark:bg-emerald-600 hover:bg-slate-900 dark:hover:bg-emerald-700 text-white px-3 py-1 rounded-lg text-[11px] font-bold transition-all active:scale-95">Copy</button>
+        </div>
+        <div class="text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 rounded-lg p-2.5 max-h-32 overflow-y-auto break-all font-mono leading-relaxed">${safeText}</div>
+    `;
+    card.dataset.snippet = text;
+    UI.downloads.prepend(card);
+    addHistory('received', 'Clipboard (' + formatBytes(text.length) + ')', text.length);
+    sndReceive();
+    notifyIfHidden('Clipboard received');
+}
+
+// ============================================================
+// 21. LIVE NOTEPAD
+// ============================================================
+UI.notepadTextarea.addEventListener('input', () => {
+    if (notepadRemoteUpdate) return;
+    const content = UI.notepadTextarea.value;
+    if (content.length > 50000) UI.notepadTextarea.value = content.substring(0, 50000);
+    UI.notepadCharCount.textContent = UI.notepadTextarea.value.length.toLocaleString() + ' / 50,000';
+    if (notepadSyncTimeout) clearTimeout(notepadSyncTimeout);
+    notepadSyncTimeout = setTimeout(() => {
+        if (currentConnection) currentConnection.send({ _type: 'notepad-sync', content: UI.notepadTextarea.value });
+    }, 200);
+});
+
+function receiveNotepadSync(content) {
+    notepadRemoteUpdate = true;
+    const ta = UI.notepadTextarea;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    ta.value = content;
+    ta.selectionStart = Math.min(start, content.length);
+    ta.selectionEnd = Math.min(end, content.length);
+    UI.notepadCharCount.textContent = content.length.toLocaleString() + ' / 50,000';
+    notepadRemoteUpdate = false;
+}
+
+// ============================================================
+// 22. WEB SHARE API
+// ============================================================
+if (navigator.share) {
+    UI.shareBtn.classList.remove('hidden');
+    UI.shareBtn.addEventListener('click', () => {
+        navigator.share({
+            title: 'FileDrop',
+            text: 'Connect with me on FileDrop!',
+            url: 'https://aea2669.github.io/webp2p/?code=' + myCode
+        }).catch(() => {});
+    });
+}
+
+// ============================================================
+// 23. SCROLL REVEAL ANIMATIONS
+// ============================================================
+(function initScrollReveal() {
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.section-reveal').forEach(el => observer.observe(el));
+})();
+// ============================================================
+// 24. PWA — SERVICE WORKER & INSTALL PROMPT
+// ============================================================
+(function initPWA() {
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+
+    let deferredPrompt = null;
+    const banner = document.getElementById('pwaInstallBanner');
+    const installBtn = document.getElementById('pwaInstallBtn');
+    const dismissBtn = document.getElementById('pwaDismissBtn');
+    if (!banner) return;
+
+    const DISMISS_KEY = 'pwa-install-dismissed';
+    const DISMISS_DAYS = 7;
+    const INSTALLED_KEY = 'pwa-installed';
+
+    function isDismissed() {
+        const ts = localStorage.getItem(DISMISS_KEY);
+        if (!ts) return false;
+        return (Date.now() - parseInt(ts, 10)) < DISMISS_DAYS * 86400000;
+    }
+
+    function isInstalled() {
+        return localStorage.getItem(INSTALLED_KEY) === '1'
+            || window.matchMedia('(display-mode: standalone)').matches
+            || navigator.standalone === true;
+    }
+
+    function showBanner() {
+        if (isInstalled() || isDismissed()) return;
+        setTimeout(() => banner.classList.add('show'), 4000);
+    }
+
+    function hideBanner() {
+        banner.classList.remove('show');
+    }
+
+    // Chromium browsers: capture install prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        showBanner();
+    });
+
+    // Install button
+    installBtn.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        deferredPrompt = null;
+        hideBanner();
+        if (outcome === 'accepted') {
+            localStorage.setItem(INSTALLED_KEY, '1');
+            if (typeof confetti === 'function') confetti({ particleCount: 80, spread: 60, origin: { y: 0.9 } });
+        }
+    });
+
+    // Dismiss button
+    dismissBtn.addEventListener('click', () => {
+        hideBanner();
+        localStorage.setItem(DISMISS_KEY, String(Date.now()));
+    });
+
+    // App installed event
+    window.addEventListener('appinstalled', () => {
+        hideBanner();
+        localStorage.setItem(INSTALLED_KEY, '1');
+        deferredPrompt = null;
+    });
+
+    // iOS Safari hint: no beforeinstallprompt, so show a manual hint
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS && !navigator.standalone && !isInstalled() && !isDismissed()) {
+        const sub = banner.querySelector('.pwa-banner-sub');
+        if (sub) sub.textContent = 'Tap Share \u279C then \u201CAdd to Home Screen\u201D';
+        installBtn.style.display = 'none';
+        setTimeout(() => banner.classList.add('show'), 4000);
+    }
+})();
+</script>
+</body>
+</html>
